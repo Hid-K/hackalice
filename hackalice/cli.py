@@ -31,6 +31,9 @@ TROUBLESHOOTING = """\
   нужно видеть список сетей; интернет — мобильные данные), либо не выдержан
   тайминг сброса (инструкция в визарде, для каждой модели своя)
 * install-firmware.sh виснет -> команда fw (патченные --max-time + -p/-v)
+* сборка dropbear: «apt-get source» не сработал -> hackalice сам включает
+  deb-src (пишет /etc/apt/sources.list.d/hackalice-deb-src.list из ваших
+  deb-источников); вручную: grep -r deb-src /etc/apt/sources.list*
 * dropbear: crypt() error -> localoptions.h с DROPBEAR_SVR_PASSWORD_AUTH 0
   (уже делается в сборке автоматически)
 * после reboot adb refused -> колонка успела обновиться: повторите сброс,

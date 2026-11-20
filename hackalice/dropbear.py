@@ -11,8 +11,8 @@ from .models import ModelSpec
 from .util import StepError, expand, run, which
 
 
-def _deb_src_command() -> str:
-    """Команда включения deb-src с учётом дистрибутива (Debian/Kali/...)."""
+def _default_src_line() -> str:
+    """Стандартная deb-src строка по дистрибутиву (когда нечего зеркалить)."""
     try:
         data = Path("/etc/os-release").read_text(errors="replace")
     except OSError:
@@ -22,12 +22,15 @@ def _deb_src_command() -> str:
     os_id = (m_id.group(1) if m_id else "debian").strip()
     codename = (m_code.group(1) if m_code else "").strip()
     if os_id == "kali":
-        return (f"echo 'deb-src http://http.kali.org/kali "
-                f"{codename or 'kali-rolling'} main contrib non-free "
-                f"non-free-firmware' > /etc/apt/sources.list.d/src.list && "
-                f"apt-get update")
-    return (f"echo 'deb-src http://deb.debian.org/debian {codename or 'trixie'} "
-            f"main' > /etc/apt/sources.list.d/src.list && apt-get update")
+        return (f"deb-src http://http.kali.org/kali {codename or 'kali-rolling'} "
+                f"main contrib non-free non-free-firmware")
+    return (f"deb-src http://deb.debian.org/debian {codename or 'trixie'} main")
+
+
+def _deb_src_command() -> str:
+    """Команда ручного включения deb-src (запасной путь, если авто не сработал)."""
+    return (f"echo '{_default_src_line()}' > "
+            f"/etc/apt/sources.list.d/src.list && apt-get update")
 
 
 def _deb_src_enabled() -> bool:
@@ -43,6 +46,147 @@ def _deb_src_enabled() -> bool:
         if re.search(r"^\s*deb-src\b", text, re.M) or "deb-src" in text:
             return True
     return False
+
+
+# --- автоматическое включение deb-src ---------------------------------------
+
+SRC_LIST_FILE = Path("/etc/apt/sources.list.d/hackalice-deb-src.list")
+
+
+def _iter_source_files():
+    files = [Path("/etc/apt/sources.list")]
+    d = Path("/etc/apt/sources.list.d")
+    if d.is_dir():
+        files += sorted(p for p in d.iterdir() if p.is_file())
+    return [p for p in files if p.exists()]
+
+
+def _merge_brackets(tokens: list[str]) -> list[str]:
+    """Склеить токены вида '[opt with spaces]' в один элемент.
+
+    apt-опции ([arch=amd64 signed-by=/x.gpg]) и cdrom-URI с пробелами
+    (cdrom:[Debian 13]/) разбиваются split() на куски — собираем обратно.
+    """
+    out, i = [], 0
+    while i < len(tokens):
+        t = tokens[i]
+        if "[" in t and "]" not in t:
+            while i + 1 < len(tokens) and "]" not in tokens[i + 1]:
+                i += 1
+                t += " " + tokens[i]
+            if i + 1 < len(tokens):
+                i += 1
+                t += " " + tokens[i]
+        out.append(t)
+        i += 1
+    return out
+
+
+def _deb_src_lines_from(text: str) -> list[str]:
+    """deb-src строки из one-line формата (sources.list / *.list)."""
+    out = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = _merge_brackets(s.split())
+        if parts[0] != "deb":        # deb-src уже источник — не дублируем
+            continue
+        rest = [p for p in parts[1:]
+                if not (p.startswith("[") and p.endswith("]"))]  # [опции]
+        if not rest or len(rest) < 3:
+            continue
+        if rest[0].startswith(("cdrom:", "file:")):
+            continue
+        out.append("deb-src " + " ".join(rest))
+    return out
+
+
+def _deb822_src_lines(text: str) -> list[str]:
+    """deb-src строки из deb822 формата (*.sources)."""
+    out: list[str] = []
+    stanza: dict[str, str] = {}
+    skip = False                # стanza уже содержит deb-src — не дублируем
+
+    def flush():
+        nonlocal skip
+        if not skip and stanza:
+            if stanza.get("Enabled", "").strip().lower() != "no":
+                comps = stanza.get("Components", "").strip()
+                for uri in _merge_brackets(
+                        stanza.get("URIs", "").split()):
+                    if uri.startswith(("cdrom:", "file:")):
+                        continue
+                    line = "deb-src {} {}".format(
+                        uri, stanza.get("Suites", "").strip())
+                    if comps:
+                        line += " " + comps
+                    out.append(line)
+        stanza.clear()
+        skip = False
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:                       # пустая строка = конец стanzi
+            flush()
+            continue
+        if s.startswith("#") or ":" not in s:
+            continue
+        key, _, value = s.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if key == "Types" and "deb-src" in value:
+            skip = True
+            stanza.clear()
+            continue
+        stanza[key] = value
+    flush()
+    return out
+
+
+def ensure_deb_src() -> None:
+    """Включить deb-src автоматически: зеркалируем существующие источники.
+
+    Пишет /etc/apt/sources.list.d/hackalice-deb-src.list с deb-src-копиями
+    всех deb-источников системы (one-line и deb822), затем apt-get update.
+    """
+    if _deb_src_enabled():
+        return
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        raise StepError("deb-src не включён, а добавление требует root. "
+                        "Один раз выполните:\n  " + _deb_src_command())
+
+    lines: list[str] = []
+    for p in _iter_source_files():
+        try:
+            text = p.read_text(errors="replace")
+        except OSError:
+            continue
+        parser = _deb822_src_lines if p.suffix == ".sources" \
+            else _deb_src_lines_from
+        lines += parser(text)
+    if not lines:
+        lines = [_default_src_line()]
+        warn("Не нашёл существующих deb-источников — добавляю стандартный "
+             "deb-src для вашего дистрибутива")
+    unique: list[str] = []
+    for line in lines:
+        if line not in unique:
+            unique.append(line)
+    try:
+        SRC_LIST_FILE.write_text(
+            "# deb-src для apt-get source (dropbear) — создано hackalice\n"
+            + "\n".join(unique) + "\n", encoding="utf-8")
+    except OSError as e:
+        raise StepError(f"не удалось записать {SRC_LIST_FILE}: {e}\n"
+                        "Включите deb-src вручную:\n  " + _deb_src_command())
+    ok(f"deb-src включён автоматически: {SRC_LIST_FILE} "
+       f"({len(unique)} источников)")
+    info("apt-get update...")
+    run("apt-get update", capture=False)
+    if not _deb_src_enabled():
+        raise StepError("apt не видит deb-src после включения — "
+                        "сделайте вручную:\n  " + _deb_src_command())
 
 
 def build_dir(cfg) -> Path:
@@ -116,10 +260,7 @@ def build(cfg, model: ModelSpec, force: bool = False) -> Path:
             warn("Старый бинарник невалиден — пересобираю")
 
     if not _deb_src_enabled():
-        raise StepError(
-            "в apt-источниках не найден deb-src — apt-get source не сможет "
-            "скачать dropbear. Включите одной командой:\n  "
-            + _deb_src_command())
+        ensure_deb_src()
 
     info("Забираю исходники dropbear...")
     res = run("apt-get update && apt-get source dropbear",

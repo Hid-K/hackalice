@@ -245,21 +245,29 @@ def _step_key(cfg: AppConfig) -> None:
 
 def _step_dropbear_source(cfg: AppConfig) -> None:
     _step(6, "SSH-сервер (dropbear)")
+    if not cfg.dropbear_bin:
+        # бинарник не задан — собираем сами, без вопросов:
+        # deb-src включится автоматически, кросс-компилятор доустановится
+        ok("Готовый бинарник не задан — соберу dropbearmulti на этом ПК "
+           "автоматически (deb-src включу, зависимости доустановлю)")
+        return
     src = _select(
         "Откуда взять dropbearmulti (статический бинарник для колонки)?",
         [
-            Choice("Собрать на этом ПК (нужен deb-src в apt-источниках)",
-                   value="build"),
-            Choice("Указать путь к готовому бинарнику", value="prebuilt"),
+            Choice("Использовать готовый: " + cfg.dropbear_bin,
+                   value="prebuilt"),
+            Choice("Собрать на этом ПК (автоматически)", value="build"),
+            Choice("Указать другой путь", value="manual"),
         ],
-        default="prebuilt" if cfg.dropbear_bin else "build",
+        default="prebuilt",
     )
     if src == "prebuilt":
-        cfg.dropbear_bin = _text(
-            "Путь к статическому dropbearmulti:",
-            default=cfg.dropbear_bin)
-    else:
+        return
+    if src == "build":
         cfg.dropbear_bin = ""
+        return
+    cfg.dropbear_bin = _text("Путь к статическому dropbearmulti:",
+                             default=cfg.dropbear_bin)
 
 
 FW_SOURCES = (
@@ -329,7 +337,7 @@ def _step_review(cfg: AppConfig, model) -> None:
     table.add_row("SSID / пароль", f"{cfg.ssid} / {cfg.ap_password}")
     table.add_row("lite-kit", cfg.lite_kit_dir)
     table.add_row("Репозиторий lite-kit", cfg.lite_kit_repo)
-    table.add_row("dropbear", cfg.dropbear_bin or "собрать на этом ПК")
+    table.add_row("dropbear", cfg.dropbear_bin or "собрать на этом ПК (авто)")
     table.add_row("SSH-ключ", cfg.ssh_key)
     from .console import console
     console.print(table)
