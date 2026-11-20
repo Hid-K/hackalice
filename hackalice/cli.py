@@ -70,6 +70,8 @@ def cmd_models(_args) -> int:
                       m.method_label, m.status_label, fw)
     console.print(table)
     dim("Добавление новых моделей — hackalice/models.py (ModelSpec).")
+    dim("Источники методов: hackalice.me (Yandex Station Extended) и "
+        "lite-kit; проект hackalice с ними не связан.")
     return 0
 
 

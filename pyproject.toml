@@ -17,5 +17,10 @@ dependencies = [
 [project.scripts]
 hackalice = "hackalice.cli:main"
 
+[project.urls]
+Homepage = "https://hackalice.me"
+Repository = "https://github.com/Hid-K/hackalice"
+Issues = "https://github.com/Hid-K/hackalice/issues"
+
 [tool.setuptools]
 packages = ["hackalice"]
