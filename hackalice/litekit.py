@@ -122,6 +122,17 @@ def download_firmware(cfg, model: ModelSpec) -> Path | None:
             f"для модели {model.name} платформа ещё не определена — "
             f"заполните ModelSpec в hackalice/models.py")
 
+    # уже скачана ранее (или перенесена с другой машины) — не качаем
+    existing = find_firmware_zip(lk, model, firmware)
+    if existing:
+        size = existing.stat().st_size
+        if size >= 50 * 1024 * 1024:
+            ok(f"Прошивка уже на месте ({size // (1024 * 1024)} МБ) — "
+               f"скачивание пропущено: {existing}")
+            ensure_downgrade_marker(lk, needed=True)
+            return existing
+        warn(f"Найденный файл подозрительно мал ({size} б) — перекачаю")
+
     info(f"Загружаю прошивку {firmware} для {model.platform} "
          f"(зеркало может быть медленным; при фейле спросим про повтор)...")
     attempt = 0
