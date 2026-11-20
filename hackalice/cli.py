@@ -37,6 +37,9 @@ TROUBLESHOOTING = """\
 * сборка dropbear: configure «C compiler cannot create executables» ->
   нет статической кросс-libc: sudo apt install -y libc6-dev-arm64-cross
   (новые версии build ставят её сами; подробности: config.log в build-каталоге)
+* apt install рвётся «Failed to fetch ... Connection failed» -> зеркало
+  Kali флапнуло: повторить команду (apt дотянет только недокачанное) или
+  сменить зеркало: sudo kali-tweaks -> Network mirroring
 * dropbear: crypt() error -> localoptions.h с DROPBEAR_SVR_PASSWORD_AUTH 0
   (уже делается в сборке автоматически)
 * после reboot adb refused -> колонка успела обновиться: повторите сброс,

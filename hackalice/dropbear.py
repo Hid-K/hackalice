@@ -243,6 +243,33 @@ CROSS_LIBC_DEV = {
 }
 
 
+def _apt_install(pkgs: list[str]) -> None:
+    """apt-get install c ретраем на флейповое зеркало (Kali rolling).
+
+    Первый провал обычно = недокачанный архив с одного из зеркал:
+    скачанные архивы apt кэширует, поэтому повтор дотягивает только
+    недостающее. Если не помогло — зеркала ротируются вручную
+    (kali-tweaks -> Network mirroring) или повтор позже.
+    """
+    res = run(["apt-get", "install", "-y", "--no-install-recommends", *pkgs],
+              check=False, capture=False)
+    if res.returncode == 0:
+        return
+    warn("apt не докачал архивы (зеркало отвалилось?) — apt-get update "
+         "и повтор с --fix-missing")
+    run("apt-get update", check=False, capture=False)
+    res2 = run(["apt-get", "install", "-y", "--fix-missing",
+                "--no-install-recommends", *pkgs], check=False,
+               capture=False)
+    if res2.returncode != 0:
+        raise StepError(
+            "apt-get install не сработал дважды (код {}). На Kali rolling "
+            "зеркала периодически флапают — повторите позже или смените "
+            "зеркало: sudo kali-tweaks (Network mirroring). "
+            "Ручной вариант:\n  sudo apt-get install -y {}".format(
+                res2.returncode, " ".join(pkgs)))
+
+
 def build(cfg, model: ModelSpec, force: bool = False) -> Path:
     """Собрать статический dropbearmulti; вернуть путь к бинарнику."""
     if model.arch == "unknown":
@@ -258,10 +285,12 @@ def build(cfg, model: ModelSpec, force: bool = False) -> Path:
     if libc_dev and not Path(f"/usr/{cross_host}/lib/libc.a").exists():
         need.append(libc_dev)
     if need:
+        # make/zlib1g-dev/dpkg-dev отдельно НЕ ставим — их уже обеспечивает
+        # гейт зависимостей; меньше пакетов = меньше транзакция apt
+        # (на Kali rolling обновление dpkg тянет цепочку linux-*)
         info("Ставлю тулчейн: " + ", ".join(need))
         run("apt-get update", capture=False)
-        run(["apt-get", "install", "-y", *need,
-             "make", "zlib1g-dev", "dpkg-dev"], capture=False)
+        _apt_install(need)
 
     build = build_dir(cfg)
     build.mkdir(parents=True, exist_ok=True)
