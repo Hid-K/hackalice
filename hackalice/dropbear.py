@@ -233,6 +233,16 @@ def verify_binary(path: str | Path) -> None:
 # Сборка
 # ---------------------------------------------------------------------------
 
+# кросс-libc: имя пакета НЕ совпадает с архитектурой (aarch64 -> arm64).
+# Без libc6-dev-*-cross нет libc.a/crt-объектов — configure падает с
+# «C compiler cannot create executables» на тесте со статической линковкой.
+CROSS_LIBC_DEV = {
+    "aarch64": "libc6-dev-arm64-cross",
+    "arm": "libc6-dev-armhf-cross",
+    "armhf": "libc6-dev-armhf-cross",
+}
+
+
 def build(cfg, model: ModelSpec, force: bool = False) -> Path:
     """Собрать статический dropbearmulti; вернуть путь к бинарнику."""
     if model.arch == "unknown":
@@ -241,11 +251,17 @@ def build(cfg, model: ModelSpec, force: bool = False) -> Path:
     cross_gcc = f"{model.arch}-linux-gnu-gcc"   # aarch64-linux-gnu-gcc
     cross_host = f"{model.arch}-linux-gnu"
 
+    need = []
     if not which(cross_gcc):
-        info(f"Ставлю кросс-компилятор ({cross_gcc}) и зависимости...")
+        need.append(f"gcc-{model.arch}-linux-gnu")
+    libc_dev = CROSS_LIBC_DEV.get(model.arch)
+    if libc_dev and not Path(f"/usr/{cross_host}/lib/libc.a").exists():
+        need.append(libc_dev)
+    if need:
+        info("Ставлю тулчейн: " + ", ".join(need))
         run("apt-get update", capture=False)
-        run("apt-get install -y gcc-aarch64-linux-gnu make zlib1g-dev "
-            "dpkg-dev", capture=False)
+        run(["apt-get", "install", "-y", *need,
+             "make", "zlib1g-dev", "dpkg-dev"], capture=False)
 
     build = build_dir(cfg)
     build.mkdir(parents=True, exist_ok=True)
@@ -282,8 +298,22 @@ def build(cfg, model: ModelSpec, force: bool = False) -> Path:
 
     env = dict(os.environ)
     env["LDFLAGS"] = "-static"  # форсируем статическую линковку
-    run(["./configure", f"--host={cross_host}", "--disable-zlib",
-         "--enable-static"], cwd=str(src), env=env, capture=False)
+    res = run(["./configure", f"--host={cross_host}", "--disable-zlib",
+               "--enable-static"], cwd=str(src), env=env, check=False,
+              capture=False)
+    if res.returncode != 0:
+        log_tail = ""
+        try:
+            log_tail = (Path(src) / "config.log").read_text(
+                errors="replace")[-1200:]
+        except OSError:
+            pass
+        raise StepError(
+            "configure не сработал (код {}). Хвост config.log:\n{}\n\n"
+            "Частая причина — нет кросс-libc для статической линковки:\n"
+            "  sudo apt install -y {}".format(
+                res.returncode, log_tail,
+                libc_dev or CROSS_LIBC_DEV["aarch64"]))
     run(["make", "PROGRAMS=dropbear dbclient dropbearkey scp", "MULTI=1",
          "-j", str(os.cpu_count() or 2)], cwd=str(src), env=env,
         capture=False)

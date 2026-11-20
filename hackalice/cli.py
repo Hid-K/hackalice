@@ -34,6 +34,9 @@ TROUBLESHOOTING = """\
 * сборка dropbear: «apt-get source» не сработал -> hackalice сам включает
   deb-src (пишет /etc/apt/sources.list.d/hackalice-deb-src.list из ваших
   deb-источников); вручную: grep -r deb-src /etc/apt/sources.list*
+* сборка dropbear: configure «C compiler cannot create executables» ->
+  нет статической кросс-libc: sudo apt install -y libc6-dev-arm64-cross
+  (новые версии build ставят её сами; подробности: config.log в build-каталоге)
 * dropbear: crypt() error -> localoptions.h с DROPBEAR_SVR_PASSWORD_AUTH 0
   (уже делается в сборке автоматически)
 * после reboot adb refused -> колонка успела обновиться: повторите сброс,
