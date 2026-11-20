@@ -100,8 +100,12 @@ sudo hackalice            # или: sudo python3 -m hackalice
   HOST:PORT`);
 * **Зеркало** — штатный `install-firmware.sh` lite-kit (может быть недоступен).
 
-В той же папке лежат `magnets.txt` (magnet-ссылки совпадают по хешам с
-данными). Свой `.torrent` можно положить в `~/.config/hackalice/torrents/`.
+Каталог `firmware_torrents/` в репозиторий **не входит**: образы прошивок —
+объекты исключительных прав Яндекса, поэтому метаданные раздачи живут вне
+git. Получите `.torrent`/магниты из сообщества (или создайте свои по уже
+скачанному архиву: `plans/firmware-archiver.py --make-torrents`) и положите
+в `firmware_torrents/` рядом с репо или в `~/.config/hackalice/torrents/`.
+По требованию правообладателя соответствующий контент удаляется.
 В CLI: `sudo hackalice fw --fw-source auto|torrent|mirror`.
 
 ## SSH-ключи
