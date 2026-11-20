@@ -1,6 +1,8 @@
 """Интерактивный мастер: проводит пользователя от настройки сети до root-SSH."""
 from __future__ import annotations
 
+import os
+
 from questionary import Choice
 from rich.table import Table
 
@@ -545,7 +547,16 @@ def run_wizard() -> int:
         "\n"
         "Отвязка от аккаунта без потери root:\n"
         "  sudo hackalice unbind".format(
-            " и OTA заблокирована" if not ota_warn else " закреплён",
+            " и OTA заблокирована" if not ota_warn else "",
             ota_warn, cfg.ssh_key),
         title="Следующие шаги", border="green")
+    # мастер идёт под sudo: ключ лежит в /root и нечитаем из
+    # пользовательского шелла — дать готовый обход
+    su = os.environ.get("SUDO_USER")
+    if su and cfg.ssh_key.startswith("/root"):
+        dim("Подсказка: ключ лежит в /root (мастер запущен под sudo). "
+            "Для ssh из своего шелла:\n"
+            "  sudo cp {} ~/.ssh/ && sudo chown {} ~/.ssh/$(basename {})"
+            " && chmod 600 ~/.ssh/$(basename {})".format(
+                cfg.ssh_key, su, cfg.ssh_key, cfg.ssh_key))
     return 0
