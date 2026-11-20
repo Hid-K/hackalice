@@ -65,12 +65,12 @@ def expand(path: str) -> str:
     return os.path.expanduser(path)
 
 
+def is_linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
 def require_root() -> None:
     if hasattr(os, "geteuid") and os.geteuid() != 0:
         raise StepError(
             "нужны права root: sudo hackalice ... "
             "(или sudo python3 -m hackalice ...)")
-
-
-def is_linux() -> bool:
-    return sys.platform.startswith("linux")
