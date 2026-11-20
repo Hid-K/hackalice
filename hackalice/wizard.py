@@ -303,7 +303,15 @@ def run_wizard() -> int:
 
     try:
         _step_env()
+        prev_model = cfg.model
         model = _step_model(cfg)
+        if model.key != prev_model:
+            # сменили устройство: сбрасываем его IP/MAC/метку из конфига
+            cfg.device_ip = ""
+            cfg.device_mac = ""
+            cfg.label = ""
+            info("Модель сменилась — IP/MAC/метка предыдущего устройства "
+                 "сброшены (реестр ключей сохранён)")
         _step_interfaces(cfg)
         _step_hotspot(cfg)
         _step_key(cfg)
