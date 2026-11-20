@@ -58,8 +58,8 @@ pip install -r requirements.txt        # rich + questionary
 Нужно **два** сетевых интерфейса: один — интернет (Wi-Fi или Ethernet),
 второй Wi-Fi адаптер — под точку доступа. Проверка: `iw list | grep -A12
 "Supported interface modes"` — должен быть режим `AP`. Для сборки dropbear
-в apt-источниках должен быть включён `deb-src` (tool подскажет точную команду,
-если его нет).
+в apt-источниках должен быть включён `deb-src` (tool подскажет точную
+команду под ваш дистрибутив — Debian или Kali).
 
 ## Быстрый старт
 

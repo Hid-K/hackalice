@@ -2,12 +2,47 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil as _shutil
 from pathlib import Path
 
 from .console import info, ok, warn
 from .models import ModelSpec
 from .util import StepError, expand, run, which
+
+
+def _deb_src_command() -> str:
+    """Команда включения deb-src с учётом дистрибутива (Debian/Kali/...)."""
+    try:
+        data = Path("/etc/os-release").read_text(errors="replace")
+    except OSError:
+        data = ""
+    m_id = re.search(r'^ID="?([^"\n]+)"?', data, re.M)
+    m_code = re.search(r'^VERSION_CODENAME="?([^"\n]+)"?', data, re.M)
+    os_id = (m_id.group(1) if m_id else "debian").strip()
+    codename = (m_code.group(1) if m_code else "").strip()
+    if os_id == "kali":
+        return (f"echo 'deb-src http://http.kali.org/kali "
+                f"{codename or 'kali-rolling'} main contrib non-free "
+                f"non-free-firmware' > /etc/apt/sources.list.d/src.list && "
+                f"apt-get update")
+    return (f"echo 'deb-src http://deb.debian.org/debian {codename or 'trixie'} "
+            f"main' > /etc/apt/sources.list.d/src.list && apt-get update")
+
+
+def _deb_src_enabled() -> bool:
+    """Есть ли deb-src в apt-источниках (классика или deb822)."""
+    paths = ["/etc/apt/sources.list"]
+    paths += [str(p) for p in Path("/etc/apt/sources.list.d").glob("*")] \
+        if Path("/etc/apt/sources.list.d").is_dir() else []
+    for path in paths:
+        try:
+            text = Path(path).read_text(errors="replace")
+        except OSError:
+            continue
+        if re.search(r"^\s*deb-src\b", text, re.M) or "deb-src" in text:
+            return True
+    return False
 
 
 def build_dir(cfg) -> Path:
@@ -80,15 +115,19 @@ def build(cfg, model: ModelSpec, force: bool = False) -> Path:
         except StepError:
             warn("Старый бинарник невалиден — пересобираю")
 
-    info("Забираю исходники dropbear (нужен deb-src в apt-источниках)...")
+    if not _deb_src_enabled():
+        raise StepError(
+            "в apt-источниках не найден deb-src — apt-get source не сможет "
+            "скачать dropbear. Включите одной командой:\n  "
+            + _deb_src_command())
+
+    info("Забираю исходники dropbear...")
     res = run("apt-get update && apt-get source dropbear",
               cwd=str(build), check=False, capture=False)
     if res.returncode != 0:
         raise StepError(
-            "apt-get source не сработал. Добавьте deb-src, например:\n"
-            "  echo 'deb-src http://deb.debian.org/debian trixie main' > \\\n"
-            "    /etc/apt/sources.list.d/src.list && apt-get update\n"
-            "(подставьте свой релиз: bookworm/trixie)")
+            "apt-get source не сработал. Команда включения deb-src для "
+            "вашего дистрибутива:\n  " + _deb_src_command())
 
     src_dirs = sorted(p for p in build.glob("dropbear-*") if p.is_dir())
     if not src_dirs:
