@@ -12,16 +12,36 @@ from .models import METHOD_DOWNGRADE, METHOD_DNS, ModelSpec
 from .util import StepError, run, which
 
 # Патчи install-firmware.sh из гайда: таймауты curl + прогресс-бар
+# (для свежеклонированного репозитория — сразу с 6 ретраями)
 CURL_PATCHES = [
     ("curl -fsSL --retry 3 --connect-timeout 10",
-     "curl -fL --progress-bar --retry 2 --connect-timeout 10 --max-time 60"),
+     "curl -fL --progress-bar --retry 6 --connect-timeout 10 --max-time 60"),
     ("curl -fsSL --retry 3 --connect-timeout 15",
-     "curl -fL --progress-bar --retry 2 --connect-timeout 15 --max-time 180"),
+     "curl -fL --progress-bar --retry 6 --connect-timeout 15 --max-time 180"),
+]
+
+# Для уже пропатченного (--max-time есть, но ретраи старые) — поднимаем до 6
+CURL_RETRY_UPGRADES = [
+    ("--retry 2 --connect-timeout 10", "--retry 6 --connect-timeout 10"),
+    ("--retry 2 --connect-timeout 15", "--retry 6 --connect-timeout 15"),
 ]
 
 
 def repo_path(cfg) -> Path:
     return lite_kit_path(cfg)
+
+
+def _confirm_retry() -> bool:
+    """Спросить пользователя, повторять ли скачивание (Ctrl-C/нет — стоп)."""
+    try:
+        import questionary
+        return bool(questionary.confirm(
+            "Зеркало не ответило. Повторить попытку скачивания?",
+            default=True).ask())
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        return False  # неинтерактивный режим — не зацикливаемся
 
 
 def ensure_repo(cfg) -> Path:
@@ -40,14 +60,24 @@ def ensure_repo(cfg) -> Path:
 
 
 def patch_install_script(lk: Path) -> int:
-    """Добавить --max-time в install-firmware.sh. Возвращает число замен."""
+    """Таймауты curl + 6 ретраев в install-firmware.sh. Возвращает число замен."""
     script = lk / "install-firmware.sh"
     if not script.exists():
         warn(f"{script} не найден — структура репозитория отличается?")
         return 0
     text = script.read_text(errors="replace")
     if "--max-time" in text:
-        info("install-firmware.sh уже содержит --max-time — патч пропущен")
+        # уже патчен таймаутами — возможно, стоит поднять число ретраев
+        upgraded = 0
+        for old, new in CURL_RETRY_UPGRADES:
+            if old in text:
+                text = text.replace(old, new)
+                upgraded += 1
+        if upgraded:
+            script.write_text(text)
+            ok(f"install-firmware.sh: ретраи curl подняты до 6 ({upgraded}/2)")
+        else:
+            info("install-firmware.sh: таймауты и ретраи уже настроены")
         return -1
     replaced = 0
     for old, new in CURL_PATCHES:
@@ -93,15 +123,31 @@ def download_firmware(cfg, model: ModelSpec) -> Path | None:
             f"заполните ModelSpec в hackalice/models.py")
 
     info(f"Загружаю прошивку {firmware} для {model.platform} "
-         f"(зеркало может быть медленным)...")
-    run(["bash", "./install-firmware.sh", "-p", model.platform, "-v", firmware],
-        cwd=str(lk), capture=False)
-
+         f"(зеркало может быть медленным; при фейле спросим про повтор)...")
+    attempt = 0
+    while True:
+        attempt += 1
+        if attempt > 1:
+            info(f"Повторная попытка скачивания #{attempt}...")
+        res = run(["bash", "./install-firmware.sh", "-p", model.platform,
+                   "-v", firmware],
+                  cwd=str(lk), check=False, capture=False)
+        if res.returncode == 0:
+            break
+        warn(f"Скачивание не удалось (попытка {attempt}).")
+        if not _confirm_retry():
+            raise StepError(
+                "зеркало недоступно/файл не скачался. Варианты: повторить "
+                "позже (команда fw), либо положить update.zip вручную в "
+                f"{lk}/firmware/{model.platform}/<версия>/update.zip "
+                "(скачав на любой сети с доступом к зеркалу)")
     zip_path = find_firmware_zip(lk, model, firmware)
     if zip_path:
         ok(f"Прошивка на месте: {zip_path}")
     else:
-        warn(f"Не нашёл .zip прошивки в {lk}/firmware — проверьте вывод выше")
+        warn(f"Установщик отчитался об успехе, но .zip не найден в "
+             f"{lk}/firmware — сервер может не найти прошивку, проверьте "
+             f"каталог вручную")
     ensure_downgrade_marker(lk, needed=True)
     return zip_path
 
