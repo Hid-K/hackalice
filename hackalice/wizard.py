@@ -402,10 +402,22 @@ def run_wizard() -> int:
         firmware_skipped = False
         if model.method == METHOD_DOWNGRADE:
             try:
-                if firmware_for(cfg, model):
-                    cfg.fw_source = _ask_fw_source(cfg, model)
-                    save_config(cfg)
-                litekit.download_firmware(cfg, model, source=cfg.fw_source)
+                firmware = firmware_for(cfg, model)
+                existing = (litekit.find_firmware_anywhere(cfg, model,
+                                                           firmware)
+                            if firmware else None)
+                if existing:
+                    # прошивка уже скачана — вопросов про источник не задаём
+                    ok("Скачанная прошивка уже есть — использую её без "
+                       "скачивания:")
+                    info(f"  {existing}")
+                    litekit.place_firmware_from_file(cfg, model, existing)
+                else:
+                    if firmware:
+                        cfg.fw_source = _ask_fw_source(cfg, model)
+                        save_config(cfg)
+                    litekit.download_firmware(cfg, model,
+                                              source=cfg.fw_source)
             except StepError as e:
                 err(str(e))
                 if _confirm("Скачать прошивку не удалось. Попробовать БЕЗ "

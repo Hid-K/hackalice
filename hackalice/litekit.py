@@ -104,6 +104,43 @@ def find_firmware_zip(lk: Path, model: ModelSpec, firmware: str) -> Path | None:
     return loose[0] if loose else None
 
 
+def find_firmware_anywhere(cfg, model: ModelSpec,
+                           firmware: str | None = None) -> Path | None:
+    """Уже скачанная прошивка в известных местах — вопрос не задаётся.
+
+    Порядок: layout lite-kit → архив загрузчика (plans/firmware_archive/,
+    <версия>/update.zip и плоский <версия>.zip) → ~/Downloads, ~/Загрузки.
+    Возвращает первый найденный zip ≥ 50 МБ или None.
+    """
+    firmware = firmware or (cfg.firmware or model.firmware)
+    if not firmware or model.platform == "unknown":
+        return None
+    min_size = 50 * 1024 * 1024
+    root = Path(__file__).resolve().parent.parent
+    archive = root / "plans" / "firmware_archive" / model.platform
+
+    candidates: list[Path] = []
+    existing_lk = find_firmware_zip(repo_path(cfg), model, firmware)
+    if existing_lk:
+        candidates.append(existing_lk)
+    candidates += [
+        archive / firmware / "update.zip",
+        archive / (firmware + ".zip"),
+    ]
+    for base in (archive, Path(expand("~/Downloads")),
+                 Path(expand("~/Загрузки"))):
+        if base.is_dir():
+            candidates += sorted(base.glob("*{}.zip".format(firmware)))
+
+    for c in candidates:
+        try:
+            if c.is_file() and c.stat().st_size >= min_size:
+                return c
+        except OSError:
+            continue
+    return None
+
+
 def _download_from_mirror(cfg, model: ModelSpec, lk: Path, firmware: str) -> Path | None:
     """Скачивание install-firmware.sh с зеркала (с вопросом про повтор)."""
     info(f"Загружаю прошивку {firmware} для {model.platform} "
@@ -258,7 +295,10 @@ def place_firmware_from_file(cfg, model: ModelSpec, src: Path) -> Path:
         raise StepError(f"файл не найден: {src}")
     dest = _firmware_dest(cfg, model)
     import shutil as _shutil
-    _shutil.copy2(src, dest)
+    try:
+        _shutil.copy2(src, dest)
+    except _shutil.SameFileError:
+        pass                          # файл уже в целевом layout
     size = dest.stat().st_size
     if size < 50 * 1024 * 1024:
         warn(f"файл мал ({size} байт) — проверьте, что это именно update.zip")
