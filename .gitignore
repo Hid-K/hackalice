@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Виртуальные окружения
+.venv/
+venv/
+
+# Временные файлы и тестовые артефакты
+.tmp/
+.tmpdeps/
+.tmp_keys/
+.tmp_blob.txt
+.tmp_msg.txt
+.tmp_tree.txt
+*.log
+
+# Ключи никогда не должны попадать в репозиторий
+*.pub
+id_*
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
