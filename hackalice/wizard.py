@@ -34,6 +34,17 @@ BINDING_INSTRUCTIONS = """\
 """
 
 
+NO_RESET_INSTRUCTIONS = """\
+БЕЗ FACTORY-СБРОСА — активация на текущей прошивке:
+ 1. НЕ делайте аппаратный сброс (питание не выдёргивать)!
+ 2. Колонка включена и загружена штатно.
+ 3. Зажмите центральную кнопку на ~5 секунд (режим смены Wi-Fi).
+ 4. Привяжите колонку к AliceSetup в приложении.
+ Работает ТОЛЬКО если сборка на колонке старше 21.10.2026
+ (например 0.369.1.46 и ранее). На 0.369.1.50+ активации не будет.
+"""
+
+
 class _Abort(Exception):
     """Пользователь отменил диалог (или диалог невозможен)."""
 
@@ -332,8 +343,24 @@ def run_wizard() -> int:
         cfg.lite_kit_repo = _text("Git-репозиторий lite-kit:",
                                   default=cfg.lite_kit_repo)
         save_config(cfg)
+        firmware_skipped = False
         if model.method == METHOD_DOWNGRADE:
-            litekit.download_firmware(cfg, model)
+            try:
+                litekit.download_firmware(cfg, model)
+            except StepError as e:
+                err(str(e))
+                if _confirm("Скачать прошивку не удалось. Попробовать БЕЗ "
+                            "отката: DNS-активация на текущей сборке "
+                            "(только если сборка старше 21.10.2026; "
+                            "factory-сброс НЕ делать)?", default=False):
+                    litekit.ensure_downgrade_marker(
+                        litekit.repo_path(cfg), needed=False)
+                    firmware_skipped = True
+                    warn("Сервер в обычном режиме. Если на колонке сборка "
+                         "0.369.1.50+ — активации не будет, прошивку "
+                         "придётся добывать всё равно.")
+                else:
+                    raise
         else:
             info("Метод «подмена DNS» — прошивка не требуется; сервер будет "
                  "работать в обычном режиме (активация ADB).")
@@ -352,6 +379,13 @@ def run_wizard() -> int:
         if _confirm("Колонка уже сброшена, привязана к этой сети и доступна "
                     "(повторный запуск после сбоя)?", default=False):
             info("Пропускаю сброс и привязку — сразу жду колонку по ADB")
+        elif firmware_skipped:
+            # без отката прошивки factory-сброс делать НЕЛЬЗЯ:
+            # активация идёт на текущей прошивке через смену Wi-Fi
+            _phase("E", "РУЧНОЙ ШАГ: смена Wi-Fi БЕЗ factory-сброса")
+            panel(NO_RESET_INSTRUCTIONS,
+                  title="Смена Wi-Fi без сброса", border="yellow")
+            wait_enter("Когда привяжете колонку к AliceSetup — Enter")
         else:
             _phase("E", "РУЧНОЙ ШАГ: аппаратный сброс колонки")
             panel(model.reset_instructions or RESET_GENERIC,

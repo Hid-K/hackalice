@@ -168,7 +168,12 @@ def cmd_fw(args) -> int:
         raise StepError(
             f"для {model.name} прошивка не нужна (метод «подмена DNS»): "
             f"сразу переходите к serve")
-    litekit.download_firmware(cfg, model)
+    if args.firmware_url:
+        litekit.place_firmware_from_url(cfg, model, args.firmware_url)
+    elif args.firmware_file:
+        litekit.place_firmware_from_file(cfg, model, Path(expand(args.firmware_file)))
+    else:
+        litekit.download_firmware(cfg, model)
     return 0
 
 
@@ -423,6 +428,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_net_down)
 
     sp = sub.add_parser("fw", help="клон lite-kit, патчи, загрузка прошивки")
+    sp.add_argument("--firmware-url", metavar="URL",
+                    help="скачать update.zip с произвольного зеркала/CDN")
+    sp.add_argument("--firmware-file", metavar="PATH",
+                    help="подложить уже скачанный update.zip в firmware/")
     sp.set_defaults(func=cmd_fw)
 
     sp = sub.add_parser("serve", help="запустить сервер отката (в фоне)")

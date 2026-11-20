@@ -9,7 +9,7 @@ from pathlib import Path
 from .config import lite_kit_path
 from .console import info, ok, warn
 from .models import METHOD_DOWNGRADE, METHOD_DNS, ModelSpec
-from .util import StepError, run, which
+from .util import StepError, expand, run, which
 
 # Патчи install-firmware.sh из гайда: таймауты curl + прогресс-бар
 # (для свежеклонированного репозитория — сразу с 6 ретраями)
@@ -150,6 +150,51 @@ def download_firmware(cfg, model: ModelSpec) -> Path | None:
              f"каталог вручную")
     ensure_downgrade_marker(lk, needed=True)
     return zip_path
+
+
+def _firmware_dest(cfg, model: ModelSpec) -> Path:
+    firmware = cfg.firmware or model.firmware
+    dest_dir = repo_path(cfg) / "firmware" / model.platform / firmware
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    return dest_dir / "update.zip"
+
+
+def place_firmware_from_url(cfg, model: ModelSpec, url: str) -> Path:
+    """Скачать update.zip сторонним curl в правильный layout firmware/.
+
+    Зеркало lite-kit может быть недоступно — если URL прошивки известен
+    (другое зеркало/официальный CDN/локальная копия), качаем напрямую.
+    """
+    dest = _firmware_dest(cfg, model)
+    info(f"Качаю {url} -> {dest}")
+    res = run(["curl", "-fL", "--progress-bar", "--retry", "6",
+               "--connect-timeout", "15", "--max-time", "3600",
+               "-o", str(dest), url], check=False, capture=False)
+    if res.returncode != 0 or not dest.exists():
+        raise StepError(f"скачивание не удалось (curl код {res.returncode})")
+    size = dest.stat().st_size
+    if size < 50 * 1024 * 1024:
+        raise StepError(f"файл подозрительно мал ({size} байт) — "
+                        f"это не update.zip?")
+    ok(f"Прошивка уложена: {dest} (~{size // (1024 * 1024)} МБ)")
+    ensure_downgrade_marker(repo_path(cfg), needed=True)
+    return dest
+
+
+def place_firmware_from_file(cfg, model: ModelSpec, src: Path) -> Path:
+    """Подложить уже скачанный update.zip в правильный layout firmware/."""
+    src = Path(expand(str(src)))
+    if not src.exists():
+        raise StepError(f"файл не найден: {src}")
+    dest = _firmware_dest(cfg, model)
+    import shutil as _shutil
+    _shutil.copy2(src, dest)
+    size = dest.stat().st_size
+    if size < 50 * 1024 * 1024:
+        warn(f"файл мал ({size} байт) — проверьте, что это именно update.zip")
+    ok(f"Прошивка уложена: {dest} (~{size // (1024 * 1024)} МБ)")
+    ensure_downgrade_marker(repo_path(cfg), needed=True)
+    return dest
 
 
 def ensure_downgrade_marker(lk: Path, needed: bool) -> None:
