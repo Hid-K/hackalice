@@ -104,8 +104,74 @@ def find_firmware_zip(lk: Path, model: ModelSpec, firmware: str) -> Path | None:
     return loose[0] if loose else None
 
 
-def download_firmware(cfg, model: ModelSpec) -> Path | None:
-    """Скачать проверенную прошивку (только для метода downgrade)."""
+def _download_from_mirror(cfg, model: ModelSpec, lk: Path, firmware: str) -> Path | None:
+    """Скачивание install-firmware.sh с зеркала (с вопросом про повтор)."""
+    info(f"Загружаю прошивку {firmware} для {model.platform} "
+         f"(зеркало может быть медленным; при фейле спросим про повтор)...")
+    attempt = 0
+    while True:
+        attempt += 1
+        if attempt > 1:
+            info(f"Повторная попытка скачивания #{attempt}...")
+        res = run(["bash", "./install-firmware.sh", "-p", model.platform,
+                   "-v", firmware],
+                  cwd=str(lk), check=False, capture=False)
+        if res.returncode == 0:
+            break
+        warn(f"Скачивание не удалось (попытка {attempt}).")
+        if not _confirm_retry():
+            raise StepError(
+                "зеркало недоступно/файл не скачался. Варианты: повторить "
+                "позже (команда fw), качать через торрент (--fw-source "
+                "torrent), либо положить update.zip вручную в "
+                f"{lk}/firmware/{model.platform}/<версия>/update.zip "
+                "(скачав на любой сети с доступом к зеркалу)")
+    zip_path = find_firmware_zip(lk, model, firmware)
+    if zip_path:
+        ok(f"Прошивка на месте: {zip_path}")
+    else:
+        warn(f"Установщик отчитался об успехе, но .zip не найден в "
+             f"{lk}/firmware — сервер может не найти прошивку, проверьте "
+             f"каталог вручную")
+    ensure_downgrade_marker(lk, needed=True)
+    return zip_path
+
+
+def _download_from_torrent(cfg, model: ModelSpec, lk: Path, firmware: str) -> Path:
+    """Скачивание .torrent из firmware_torrents/ через libtorrent (DHT)."""
+    from . import torrent as _torrent
+    tf = _torrent.find_torrent_file(model, firmware)
+    if tf is None:
+        raise StepError(
+            ".torrent для {} {} не найден (искал в {} и {}). Положите файл "
+            "туда, скачайте с зеркала (--fw-source mirror) или оставьте "
+            "--fw-source auto".format(model.platform, firmware,
+                                      _torrent.repo_torrents_dir(),
+                                      _torrent.user_torrents_dir()))
+    proxy = getattr(cfg, "torrent_proxy", "") or ""
+    info("Скачиваю через BitTorrent: {}{}".format(
+        tf.name, " (SOCKS5 {})".format(proxy) if proxy else ""))
+    save_dir = lk / "firmware" / model.platform
+    payload = _torrent.download_torrent(tf, save_dir, proxy=proxy)
+    zip_path = payload / "update.zip"
+    if not zip_path.exists():
+        zip_path = find_firmware_zip(lk, model, firmware) or zip_path
+    if not zip_path.exists() or zip_path.stat().st_size < 50 * 1024 * 1024:
+        raise StepError(
+            "после торрента update.zip не найден/мал: {} — проверьте "
+            "содержимое {}".format(zip_path, payload))
+    ok(f"Прошивка на месте: {zip_path}")
+    ensure_downgrade_marker(lk, needed=True)
+    return zip_path
+
+
+def download_firmware(cfg, model: ModelSpec, source: str = "auto") -> Path | None:
+    """Скачать проверенную прошивку (только для метода downgrade).
+
+    source: auto (торрент, если есть .torrent, иначе зеркало) |
+            torrent (только торрент, без fallback) |
+            mirror (только зеркало).
+    """
     if model.method == METHOD_DNS:
         raise StepError(
             f"для {model.name} прошивка не нужна (метод «подмена DNS»): "
@@ -133,34 +199,27 @@ def download_firmware(cfg, model: ModelSpec) -> Path | None:
             return existing
         warn(f"Найденный файл подозрительно мал ({size} б) — перекачаю")
 
-    info(f"Загружаю прошивку {firmware} для {model.platform} "
-         f"(зеркало может быть медленным; при фейле спросим про повтор)...")
-    attempt = 0
-    while True:
-        attempt += 1
-        if attempt > 1:
-            info(f"Повторная попытка скачивания #{attempt}...")
-        res = run(["bash", "./install-firmware.sh", "-p", model.platform,
-                   "-v", firmware],
-                  cwd=str(lk), check=False, capture=False)
-        if res.returncode == 0:
-            break
-        warn(f"Скачивание не удалось (попытка {attempt}).")
-        if not _confirm_retry():
-            raise StepError(
-                "зеркало недоступно/файл не скачался. Варианты: повторить "
-                "позже (команда fw), либо положить update.zip вручную в "
-                f"{lk}/firmware/{model.platform}/<версия>/update.zip "
-                "(скачав на любой сети с доступом к зеркалу)")
-    zip_path = find_firmware_zip(lk, model, firmware)
-    if zip_path:
-        ok(f"Прошивка на месте: {zip_path}")
+    source = (source or "auto").strip().lower()
+    if source not in ("auto", "torrent", "mirror"):
+        raise StepError("неизвестный источник прошивки: {} "
+                        "(auto|torrent|mirror)".format(source))
+
+    if source == "mirror":
+        return _download_from_mirror(cfg, model, lk, firmware)
+    if source == "torrent":
+        return _download_from_torrent(cfg, model, lk, firmware)
+
+    # auto: торрент при наличии .torrent, при фейле — зеркало
+    from . import torrent as _torrent
+    if _torrent.find_torrent_file(model, firmware):
+        try:
+            return _download_from_torrent(cfg, model, lk, firmware)
+        except StepError as e:
+            warn("торрент не удался: {} — переключаюсь на зеркало".format(e))
     else:
-        warn(f"Установщик отчитался об успехе, но .zip не найден в "
-             f"{lk}/firmware — сервер может не найти прошивку, проверьте "
-             f"каталог вручную")
-    ensure_downgrade_marker(lk, needed=True)
-    return zip_path
+        info(".torrent для этой версии нет в firmware_torrents/ — "
+             "качаю с зеркала")
+    return _download_from_mirror(cfg, model, lk, firmware)
 
 
 def _firmware_dest(cfg, model: ModelSpec) -> Path:

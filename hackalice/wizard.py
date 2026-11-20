@@ -262,6 +262,49 @@ def _step_dropbear_source(cfg: AppConfig) -> None:
         cfg.dropbear_bin = ""
 
 
+FW_SOURCES = (
+    ("auto", "Авто: торрент, если есть .torrent (иначе зеркало)"),
+    ("torrent", "Торрент (DHT + tracker.opentrackr.org)"),
+    ("mirror", "Зеркало lite-kit (HTTP)"),
+)
+
+
+def _ask_fw_source(cfg: AppConfig, model) -> str:
+    """Выбор источника прошивки отката: зеркало / торрент / авто."""
+    from . import torrent as _torrent
+    firmware = firmware_for(cfg, model)
+    tf = _torrent.find_torrent_file(model, firmware) if firmware else None
+    while True:
+        src = _select(
+            "Откуда качать прошивку отката?",
+            [Choice(label, value=v) for v, label in FW_SOURCES],
+            default=cfg.fw_source if cfg.fw_source in dict(FW_SOURCES)
+            else "auto")
+        if src == "torrent" and tf is None:
+            warn(".torrent для {} {} не найден (ищу в {} и {}) — выберите "
+                 "другой источник или положите файл туда".format(
+                     model.platform, firmware,
+                     _torrent.repo_torrents_dir(),
+                     _torrent.user_torrents_dir()))
+            continue
+        break
+    if tf is not None and src in ("torrent", "auto"):
+        cfg.torrent_proxy = _ask_p2p_proxy(cfg)
+    if src == "auto":
+        ok("Источник прошивки: авто ({})".format(
+            "начну с торрента" if tf is not None else "зеркало — .torrent нет"))
+    else:
+        ok("Источник прошивки: " + src)
+    return src
+
+
+def _ask_p2p_proxy(cfg: AppConfig) -> str:
+    warn("BitTorrent: ваш IP-адрес будет виден пирам и трекерам. "
+         "Если есть SOCKS5-прокси — P2P пойдёт через него.")
+    return _text("SOCKS5-прокси для P2P (HOST:PORT; Enter — без прокси):",
+                 default=cfg.torrent_proxy)
+
+
 def _step_review(cfg: AppConfig, model) -> None:
     _step(7, "Подтверждение")
     _fw = firmware_for(cfg, model)
@@ -276,6 +319,11 @@ def _step_review(cfg: AppConfig, model) -> None:
     table.add_row("Платформа / архитектура", f"{model.platform} / {model.arch}")
     table.add_row("Метод", model.method_label)
     table.add_row("Прошивка отката", fw)
+    if model.method == METHOD_DOWNGRADE and _fw:
+        src_label = dict(FW_SOURCES).get(cfg.fw_source, cfg.fw_source)
+        if cfg.torrent_proxy and cfg.fw_source != "mirror":
+            src_label += " через SOCKS5 " + cfg.torrent_proxy
+        table.add_row("Источник прошивки", src_label)
     table.add_row("Интернет-интерфейс", cfg.inet_iface)
     table.add_row("Интерфейс точки доступа", cfg.ap_iface)
     table.add_row("SSID / пароль", f"{cfg.ssid} / {cfg.ap_password}")
@@ -346,7 +394,10 @@ def run_wizard() -> int:
         firmware_skipped = False
         if model.method == METHOD_DOWNGRADE:
             try:
-                litekit.download_firmware(cfg, model)
+                if firmware_for(cfg, model):
+                    cfg.fw_source = _ask_fw_source(cfg, model)
+                    save_config(cfg)
+                litekit.download_firmware(cfg, model, source=cfg.fw_source)
             except StepError as e:
                 err(str(e))
                 if _confirm("Скачать прошивку не удалось. Попробовать БЕЗ "

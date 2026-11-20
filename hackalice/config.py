@@ -54,6 +54,8 @@ class AppConfig:
     label: str = ""               # метка текущей колонки ("кухня" и т.п.)
     device_mac: str = ""          # MAC колонки (для поиска после смены IP)
     hotspot_static_ip: str = "10.42.0.200"  # статический IP колонки на хотспоте
+    fw_source: str = "auto"       # источник прошивки: auto | torrent | mirror
+    torrent_proxy: str = ""       # SOCKS5-прокси для P2P (HOST:PORT), "" = нет
     # маппинг «метка колонки» -> {"key": путь, "ip": адрес, "mac": MAC}
     speakers: dict = field(default_factory=dict)
 

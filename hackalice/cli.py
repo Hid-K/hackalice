@@ -173,7 +173,7 @@ def cmd_fw(args) -> int:
     elif args.firmware_file:
         litekit.place_firmware_from_file(cfg, model, Path(expand(args.firmware_file)))
     else:
-        litekit.download_firmware(cfg, model)
+        litekit.download_firmware(cfg, model, source=cfg.fw_source or "auto")
     return 0
 
 
@@ -393,6 +393,11 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hotspot-static-ip",
                    help="постоянный IP колонки на хотспоте "
                         "(по умолчанию 10.42.0.200)")
+    p.add_argument("--fw-source", choices=("auto", "torrent", "mirror"),
+                   help="источник прошивки отката: auto (торрент, если есть "
+                        ".torrent, иначе зеркало) | torrent | mirror")
+    p.add_argument("--torrent-proxy", metavar="HOST:PORT",
+                   help="SOCKS5-прокси для P2P-загрузки прошивки")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -427,7 +432,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="удалить и NAT-правила")
     sp.set_defaults(func=cmd_net_down)
 
-    sp = sub.add_parser("fw", help="клон lite-kit, патчи, загрузка прошивки")
+    sp = sub.add_parser("fw", help="клон lite-kit, патчи, загрузка прошивки "
+                                   "(--fw-source auto|torrent|mirror)")
+    sp.add_argument("--fw-source", choices=("auto", "torrent", "mirror"),
+                    default=argparse.SUPPRESS,
+                    help="источник прошивки отката")
+    sp.add_argument("--torrent-proxy", metavar="HOST:PORT",
+                    default=argparse.SUPPRESS,
+                    help="SOCKS5-прокси для P2P-загрузки")
     sp.add_argument("--firmware-url", metavar="URL",
                     help="скачать update.zip с произвольного зеркала/CDN")
     sp.add_argument("--firmware-file", metavar="PATH",

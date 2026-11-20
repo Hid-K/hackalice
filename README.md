@@ -83,6 +83,23 @@ sudo hackalice            # или: sudo python3 -m hackalice
 Выборы сохраняются в `~/.config/hackalice/config.json` и подставляются при
 следующем запуске.
 
+## Прошивка отката: зеркало или торрент
+
+Для моделей с методом «откат» визард перед фазой B спрашивает, откуда качать
+прошивку:
+
+* **Авто** (по умолчанию) — торрент, если для версии есть `.torrent`
+  в `firmware_torrents/`, иначе зеркало;
+* **Торрент** — BitTorrent через DHT + tracker.opentrackr.org (модуль
+  libtorrent ставится автоматически: apt на системном Python, pip в venv);
+  ваш IP виден пирам — можно указать SOCKS5-прокси (`--torrent-proxy
+  HOST:PORT`);
+* **Зеркало** — штатный `install-firmware.sh` lite-kit (может быть недоступен).
+
+В той же папке лежат `magnets.txt` (magnet-ссылки совпадают по хешам с
+данными). Свой `.torrent` можно положить в `~/.config/hackalice/torrents/`.
+В CLI: `sudo hackalice fw --fw-source auto|torrent|mirror`.
+
 ## SSH-ключи
 
 Хранилище ключей: `~/.config/hackalice/keys` (меняется `--keys-dir`).
@@ -121,6 +138,8 @@ hackalice add-key --key-name new --label спальня
 sudo hackalice check         # окружение, интерфейсы, модель
 sudo hackalice net-up        # hotspot + DNS + NAT
 sudo hackalice fw            # клон lite-kit, патчи, загрузка прошивки .46
+sudo hackalice fw --fw-source torrent            # только через BitTorrent
+sudo hackalice fw --fw-source torrent --torrent-proxy 127.0.0.1:10808
 sudo hackalice build-dropbear
 sudo hackalice serve         # сервер отката в фоне (лог ~/lite-kit/run/server.log)
 # ...аппаратный сброс колонки и привязка на телефоне...
@@ -171,6 +190,7 @@ hackalice/
 │   ├── netenv.py     # интерфейсы, hotspot, DNS, NAT
 │   ├── device.py     # ADB-обёртка, поиск колонки, ожидание root, SSH-проверки
 │   ├── litekit.py    # lite-kit: клон/патчи/прошивка/сервер отката
+│   ├── torrent.py    # скачивание прошивки по BitTorrent (libtorrent + DHT)
 │   ├── dropbear.py   # кросс-сборка статического dropbear
 │   ├── installer.py  # установка SSH на колонку, OTA-блок, unbind
 │   ├── deps.py       # системные зависимости (apt)
